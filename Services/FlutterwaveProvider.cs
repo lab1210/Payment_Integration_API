@@ -32,7 +32,7 @@ public class FlutterwaveProvider : IPaymentProvider
             meta = request.Metadata
         };
 
-        var httpResponse = await _httpClient.PostAsJsonAsync("/payments", payload);
+        var httpResponse = await _httpClient.PostAsJsonAsync("payments", payload);
         var content = await httpResponse.Content.ReadAsStringAsync();
 
         if (!httpResponse.IsSuccessStatusCode)
@@ -48,10 +48,25 @@ public class FlutterwaveProvider : IPaymentProvider
         }
 
         var doc = JsonDocument.Parse(content);
-        var status = doc.RootElement.GetProperty("status").GetString() ?? "failed";
-        var data = doc.RootElement.GetProperty("data");
-        var transactionId = data.GetProperty("id").GetInt32().ToString();
-        var link = data.GetProperty("link").GetString();
+        var root = doc.RootElement;
+        var status = root.TryGetProperty("status", out var statusElement)
+            ? statusElement.GetString() ?? "failed"
+            : "failed";
+
+        if (!root.TryGetProperty("data", out var data) || data.ValueKind == JsonValueKind.Null)
+        {
+            return new PaymentResult
+            {
+                Success = false,
+                Provider = PaymentProvider.Flutterwave,
+                Status = status,
+                Message = "Flutterwave initialize failed: missing response data",
+                RawResponseJson = content
+            };
+        }
+
+        var transactionId = data.TryGetProperty("id", out var idProp) ? idProp.GetInt32().ToString() : string.Empty;
+        var link = data.TryGetProperty("link", out var linkProp) ? linkProp.GetString() : null;
 
         return new PaymentResult
         {
@@ -66,7 +81,7 @@ public class FlutterwaveProvider : IPaymentProvider
 
     public async Task<PaymentVerificationResult> VerifyAsync(string reference)
     {
-        var httpResponse = await _httpClient.GetAsync($"/transactions/verify_by_reference?tx_ref={Uri.EscapeDataString(reference)}");
+        var httpResponse = await _httpClient.GetAsync($"transactions/verify_by_reference?tx_ref={Uri.EscapeDataString(reference)}");
         var content = await httpResponse.Content.ReadAsStringAsync();
 
         if (!httpResponse.IsSuccessStatusCode)
@@ -75,9 +90,18 @@ public class FlutterwaveProvider : IPaymentProvider
         }
 
         var doc = JsonDocument.Parse(content);
-        var status = doc.RootElement.GetProperty("status").GetString() ?? "failed";
-        var data = doc.RootElement.GetProperty("data");
-        var transactionId = data.GetProperty("id").GetInt32().ToString();
-        return new PaymentVerificationResult { Success = status.Equals("success", StringComparison.OrdinalIgnoreCase), Status = data.GetProperty("status").GetString() ?? "unknown", TransactionId = transactionId, RawResponseJson = content };
+        var root = doc.RootElement;
+        var status = root.TryGetProperty("status", out var statusElement)
+            ? statusElement.GetString() ?? "failed"
+            : "failed";
+
+        if (!root.TryGetProperty("data", out var data) || data.ValueKind == JsonValueKind.Null)
+        {
+            return new PaymentVerificationResult { Success = false, Status = status, RawResponseJson = content };
+        }
+
+        var transactionId = data.TryGetProperty("id", out var idProp) ? idProp.GetInt32().ToString() : string.Empty;
+        var providerStatus = data.TryGetProperty("status", out var providerStatusProp) ? providerStatusProp.GetString() ?? "unknown" : "unknown";
+        return new PaymentVerificationResult { Success = status.Equals("success", StringComparison.OrdinalIgnoreCase), Status = providerStatus, TransactionId = transactionId, RawResponseJson = content };
     }
 }

@@ -37,6 +37,7 @@ public class PaymentVerificationResult
     public string Status { get; set; } = string.Empty;
     public string? TransactionId { get; set; }
     public string? RawResponseJson { get; set; }
+    public string? Message { get; internal set; }
 }
 
 public class PaymentStatusResult
