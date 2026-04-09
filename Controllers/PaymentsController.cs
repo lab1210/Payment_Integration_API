@@ -21,9 +21,12 @@ public class PaymentsController : ControllerBase
         if (request.Amount <= 0)
             return BadRequest("Amount must be greater than 0.");
 
-        request.Reference = string.IsNullOrWhiteSpace(request.Reference)
-            ? Guid.NewGuid().ToString("N")
-            : request.Reference;
+        // Use studentId as reference if provided, otherwise use provided reference or generate GUID
+        request.Reference = !string.IsNullOrWhiteSpace(request.Metadata?.StudentId)
+            ? request.Metadata.StudentId
+            : string.IsNullOrWhiteSpace(request.Reference)
+                ? Guid.NewGuid().ToString("N")
+                : request.Reference;
 
         var result = await _paymentService.InitiateAsync(request);
         if (!result.Success)

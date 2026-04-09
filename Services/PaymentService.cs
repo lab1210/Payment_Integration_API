@@ -27,32 +27,34 @@ public class PaymentService
         IOptions<PaystackOptions> paystackOptions,
         IOptions<InterswitchOptions> interswitchOptions)
     {
-        _providerFactory = providerFactory;
-        _dbContext = dbContext;
+        _providerFactory    = providerFactory;
+        _dbContext          = dbContext;
         _flutterwaveOptions = flutterwaveOptions.Value;
-        _paystackOptions = paystackOptions.Value;
+        _paystackOptions    = paystackOptions.Value;
         _interswitchOptions = interswitchOptions.Value;
     }
+
+    // ── Initiate ─────────────────────────────────────────────────────────────
 
     public async Task<PaymentResult> InitiateAsync(PaymentRequest request)
     {
         var provider = _providerFactory.GetProvider(request.Provider);
-        var result = await provider.ChargeCustomerAsync(request);
+        var result   = await provider.ChargeCustomerAsync(request);
 
         var transaction = new PaymentTransaction
         {
-            Id = Guid.NewGuid(),
-            Provider = request.Provider,
-            Reference = request.Reference,
-            TransactionId = result.TransactionId,
-            Amount = request.Amount,
-            Currency = request.Currency,
-            CustomerEmail = request.CustomerEmail,
-            Status = result.Status,
-            IsSuccess = result.Success,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-            RawRequestJson = System.Text.Json.JsonSerializer.Serialize(request),
+            Id              = Guid.NewGuid(),
+            Provider        = request.Provider,
+            Reference       = request.Reference,
+            TransactionId   = result.TransactionId,
+            Amount          = request.Amount,
+            Currency        = request.Currency,
+            CustomerEmail   = request.CustomerEmail,
+            Status          = result.Status,
+            IsSuccess       = result.Success,
+            CreatedAt       = DateTime.UtcNow,
+            UpdatedAt       = DateTime.UtcNow,
+            RawRequestJson  = JsonSerializer.Serialize(request),
             RawResponseJson = result.RawResponseJson
         };
 
@@ -62,20 +64,24 @@ public class PaymentService
         return result;
     }
 
+    // ── Verify ───────────────────────────────────────────────────────────────
+
     public async Task<PaymentVerificationResult> VerifyAsync(PaymentProvider provider, string reference)
     {
         var paymentProvider = _providerFactory.GetProvider(provider);
-        var result = await paymentProvider.VerifyAsync(reference);
+        var result          = await paymentProvider.VerifyAsync(reference);
 
         if (!string.IsNullOrWhiteSpace(reference))
         {
-            var existing = await _dbContext.PaymentTransactions.FirstOrDefaultAsync(x => x.Reference == reference);
+            var existing = await _dbContext.PaymentTransactions
+                .FirstOrDefaultAsync(x => x.Reference == reference);
+
             if (existing != null)
             {
-                existing.Status = result.Status;
-                existing.IsSuccess = result.Success;
+                existing.Status        = result.Status;
+                existing.IsSuccess     = result.Success;
                 existing.TransactionId = result.TransactionId ?? existing.TransactionId;
-                existing.UpdatedAt = DateTime.UtcNow;
+                existing.UpdatedAt     = DateTime.UtcNow;
                 existing.RawResponseJson = result.RawResponseJson;
                 await _dbContext.SaveChangesAsync();
             }
@@ -84,100 +90,131 @@ public class PaymentService
         return result;
     }
 
+    // ── Status ───────────────────────────────────────────────────────────────
+
     public async Task<PaymentStatusResult> GetStatusAsync(string reference, bool refresh = false)
     {
-        var transaction = await _dbContext.PaymentTransactions.FirstOrDefaultAsync(x => x.Reference == reference);
+        var transaction = await _dbContext.PaymentTransactions
+            .FirstOrDefaultAsync(x => x.Reference == reference);
+
         if (transaction == null)
             return new PaymentStatusResult { Reference = reference, Status = "not_found" };
 
-        // If refresh requested or status is still pending/initialized, verify with provider
         if (refresh || IsPendingStatus(transaction.Status))
         {
             var verification = await VerifyAsync(transaction.Provider, reference);
-            // Update transaction if verification succeeded
             if (verification.Success || !string.IsNullOrEmpty(verification.Status))
             {
-                transaction.Status = verification.Status;
-                transaction.IsSuccess = verification.Success;
+                transaction.Status        = verification.Status;
+                transaction.IsSuccess     = verification.Success;
                 transaction.TransactionId = verification.TransactionId ?? transaction.TransactionId;
-                transaction.UpdatedAt = DateTime.UtcNow;
+                transaction.UpdatedAt     = DateTime.UtcNow;
                 await _dbContext.SaveChangesAsync();
             }
         }
 
         return new PaymentStatusResult
         {
-            Reference = transaction.Reference,
-            Provider = transaction.Provider,
-            Status = transaction.Status,
-            IsSuccess = transaction.IsSuccess,
-            CreatedAt = transaction.CreatedAt,
-            UpdatedAt = transaction.UpdatedAt,
+            Reference     = transaction.Reference,
+            Provider      = transaction.Provider,
+            Status        = transaction.Status,
+            IsSuccess     = transaction.IsSuccess,
+            CreatedAt     = transaction.CreatedAt,
+            UpdatedAt     = transaction.UpdatedAt,
             TransactionId = transaction.TransactionId
         };
     }
 
-    private bool IsPendingStatus(string status)
-    {
-        return status.Equals("initialized", StringComparison.OrdinalIgnoreCase) ||
-               status.Equals("pending", StringComparison.OrdinalIgnoreCase) ||
-               string.IsNullOrEmpty(status);
-    }
+    // ── Webhook ──────────────────────────────────────────────────────────────
 
     public async Task<bool> ProcessWebhookAsync(PaymentProvider provider, HttpRequest request)
     {
         try
         {
-            // Read raw body
             request.EnableBuffering();
+
             using var reader = new StreamReader(request.Body, Encoding.UTF8, leaveOpen: true);
             var body = await reader.ReadToEndAsync();
             request.Body.Position = 0;
 
-            // Verify signature
+            // Step 1: Verify webhook signature
             if (!VerifyWebhookSignature(provider, body, request.Headers))
                 return false;
 
-            // Parse payload
             var payload = JsonDocument.Parse(body).RootElement;
 
             string reference;
-            string status;
-            string? transactionId = null;
 
+            // Step 2: Extract reference from webhook
             switch (provider)
             {
                 case PaymentProvider.Paystack:
                     reference = payload.GetProperty("data").GetProperty("reference").GetString() ?? "";
-                    var eventType = payload.GetProperty("event").GetString();
-                    status = eventType == "charge.success" ? "success" : "failed";
-                    transactionId = payload.GetProperty("data").GetProperty("id").GetInt32().ToString();
                     break;
+
                 case PaymentProvider.Flutterwave:
                     reference = payload.GetProperty("data").GetProperty("tx_ref").GetString() ?? "";
-                    status = payload.GetProperty("data").GetProperty("status").GetString() ?? "";
-                    transactionId = payload.GetProperty("data").GetProperty("id").GetInt32().ToString();
                     break;
+
                 case PaymentProvider.Interswitch:
-                    // Placeholder: adjust based on Interswitch webhook payload
-                    reference = payload.GetProperty("reference").GetString() ?? "";
-                    status = payload.GetProperty("status").GetString() ?? "";
-                    transactionId = payload.GetProperty("transactionId").GetString();
+                    reference = TryGetString(payload, "uuid") ?? "";
                     break;
+
                 default:
                     return false;
             }
 
-            // Update DB
-            var transaction = await _dbContext.PaymentTransactions.FirstOrDefaultAsync(x => x.Reference == reference);
-            if (transaction != null)
+            if (string.IsNullOrWhiteSpace(reference))
+                return false;
+
+            // Step 3: Match reference with DB
+            var transaction = await _dbContext.PaymentTransactions
+                .FirstOrDefaultAsync(x => x.Reference == reference);
+
+            if (transaction == null)
             {
-                transaction.Status = status;
-                transaction.IsSuccess = status.Equals("success", StringComparison.OrdinalIgnoreCase);
-                transaction.TransactionId = transactionId ?? transaction.TransactionId;
-                transaction.UpdatedAt = DateTime.UtcNow;
-                await _dbContext.SaveChangesAsync();
+                // Unknown reference and may be possible fraud
+                return false;
             }
+
+            // Step 4: Idempotency (avoid double processing)
+            if (transaction.IsSuccess)
+                return true;
+
+            // Step 5: VERIFY WITH PROVIDER (CRITICAL)
+            var verification = await VerifyAsync(provider, reference);
+
+            // Step 6: Ensure provider ALSO confirms this reference
+            if (!verification.Success)
+            {
+                transaction.Status    = "failed";
+                transaction.IsSuccess = false;
+                transaction.UpdatedAt = DateTime.UtcNow;
+
+                await _dbContext.SaveChangesAsync();
+                return true;
+            }
+
+            // Step 7: Ensure reference consistency
+            if (!string.Equals(transaction.Reference, reference, StringComparison.Ordinal))
+            {
+                return false; // mismatch → reject
+            }
+
+            // Step 8: Validate amount (ANTI-FRAUD)
+            if (verification.Amount != transaction.Amount)
+            {
+                return false;
+            }
+
+            // Step 9: Update DB ONLY AFTER FULL VERIFICATION
+            transaction.Status        = "success";
+            transaction.IsSuccess     = true;
+            transaction.TransactionId = verification.TransactionId ?? transaction.TransactionId;
+            transaction.UpdatedAt     = DateTime.UtcNow;
+            transaction.RawResponseJson = verification.RawResponseJson;
+
+            await _dbContext.SaveChangesAsync();
 
             return true;
         }
@@ -187,37 +224,53 @@ public class PaymentService
         }
     }
 
+    //  Webhook Signature Verification
+
     private bool VerifyWebhookSignature(PaymentProvider provider, string body, IHeaderDictionary headers)
     {
         switch (provider)
         {
             case PaymentProvider.Paystack:
             {
-                var paystackSignature = headers["x-paystack-signature"].ToString();
-                if (string.IsNullOrEmpty(paystackSignature)) return false;
+                var sig = headers["x-paystack-signature"].ToString();
+                if (string.IsNullOrEmpty(sig)) return false;
                 using var hmac = new HMACSHA512(Encoding.UTF8.GetBytes(_paystackOptions.WebhookSecret));
-                var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(body));
-                var expectedSignature = BitConverter.ToString(hash).Replace("-", "").ToLower();
-                return paystackSignature == expectedSignature;
+                var hash       = hmac.ComputeHash(Encoding.UTF8.GetBytes(body));
+                var expected   = BitConverter.ToString(hash).Replace("-", "").ToLower();
+                return sig == expected;
             }
 
             case PaymentProvider.Flutterwave:
-                var flutterwaveHash = headers["verif-hash"].ToString();
-                return flutterwaveHash == _flutterwaveOptions.WebhookSecret;
+            {
+                // Flutterwave uses a plain shared secret in the verif-hash header
+                var hash = headers["verif-hash"].ToString();
+                return hash == _flutterwaveOptions.WebhookSecret;
+            }
 
             case PaymentProvider.Interswitch:
             {
-                // Placeholder: implement HMAC with client secret
-                var interswitchSignature = headers["signature"].ToString();
-                if (string.IsNullOrEmpty(interswitchSignature)) return false;
-                using var hmacInt = new HMACSHA256(Encoding.UTF8.GetBytes(_interswitchOptions.WebhookSecret));
-                var hashInt = hmacInt.ComputeHash(Encoding.UTF8.GetBytes(body));
-                var expectedInt = BitConverter.ToString(hashInt).Replace("-", "").ToLower();
-                return interswitchSignature == expectedInt;
+                // Interswitch signs with HmacSHA512 and sends the result (hex) in X-Interswitch-Signature
+                var sig = headers["X-Interswitch-Signature"].ToString();
+                if (string.IsNullOrEmpty(sig)) return false;
+
+                using var hmac = new HMACSHA512(Encoding.UTF8.GetBytes(_interswitchOptions.WebhookSecret));
+                var hash       = hmac.ComputeHash(Encoding.UTF8.GetBytes(body));
+                var expected   = BitConverter.ToString(hash).Replace("-", "").ToLower();
+                return sig.ToLower() == expected;
             }
 
             default:
                 return false;
         }
     }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private static bool IsPendingStatus(string status) =>
+        status.Equals("initialized", StringComparison.OrdinalIgnoreCase) ||
+        status.Equals("pending",     StringComparison.OrdinalIgnoreCase) ||
+        string.IsNullOrEmpty(status);
+
+    private static string? TryGetString(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out var prop) ? prop.GetString() : null;
 }

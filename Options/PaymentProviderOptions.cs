@@ -23,4 +23,7 @@ public class InterswitchOptions
     public string PayItemId { get; set; } = string.Empty;
     public string BaseUrl { get; set; } = "https://sandbox.interswitchng.com";
     public string WebhookSecret { get; set; } = string.Empty; // for HMAC
+    public string WebCheckoutUrl { get; set; } = string.Empty;
+    public object? GetTransactionUrl { get; internal set; }
+    public string? TokenUrl { get; internal set; }
 }
