@@ -68,23 +68,29 @@ public class PaymentService
 
     public async Task<PaymentVerificationResult> VerifyAsync(PaymentProvider provider, string reference)
     {
+        // Fetch existing transaction to get the amount
+        var existing = await _dbContext.PaymentTransactions
+            .FirstOrDefaultAsync(x => x.Reference == reference);
+
+        if (existing == null)
+            return new PaymentVerificationResult { Success = false, Status = "not_found" };
+
+        // Convert amount to kobo for provider verification
+        var amountInKobo = (int)Math.Round(existing.Amount * 100);
+
         var paymentProvider = _providerFactory.GetProvider(provider);
-        var result          = await paymentProvider.VerifyAsync(reference);
+        var result          = await paymentProvider.VerifyAsync(reference, amountInKobo);
 
         if (!string.IsNullOrWhiteSpace(reference))
         {
-            var existing = await _dbContext.PaymentTransactions
-                .FirstOrDefaultAsync(x => x.Reference == reference);
-
-            if (existing != null)
-            {
-                existing.Status        = result.Status;
-                existing.IsSuccess     = result.Success;
-                existing.TransactionId = result.TransactionId ?? existing.TransactionId;
-                existing.UpdatedAt     = DateTime.UtcNow;
-                existing.RawResponseJson = result.RawResponseJson;
-                await _dbContext.SaveChangesAsync();
-            }
+            if (result.Amount > 0)
+                existing.Amount = result.Amount;
+            existing.Status        = result.Status;
+            existing.IsSuccess     = result.Success;
+            existing.TransactionId = result.TransactionId ?? existing.TransactionId;
+            existing.UpdatedAt     = DateTime.UtcNow;
+            existing.RawResponseJson = result.RawResponseJson;
+            await _dbContext.SaveChangesAsync();
         }
 
         return result;

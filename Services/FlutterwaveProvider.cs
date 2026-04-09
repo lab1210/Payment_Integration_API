@@ -90,7 +90,7 @@ public class FlutterwaveProvider : IPaymentProvider
         };
     }
 
-    public async Task<PaymentVerificationResult> VerifyAsync(string reference)
+    public async Task<PaymentVerificationResult> VerifyAsync(string reference, object amountInKobo)
     {
         var httpResponse = await _httpClient.GetAsync($"transactions/verify_by_reference?tx_ref={Uri.EscapeDataString(reference)}");
         var content = await httpResponse.Content.ReadAsStringAsync();

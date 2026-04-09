@@ -116,7 +116,7 @@ public class InterswitchProvider : IPaymentProvider
 
     //  2. Verify / Requery Transaction ─
 
-    public async Task<PaymentVerificationResult> VerifyAsync(string reference)
+    public async Task<PaymentVerificationResult> VerifyAsync(string reference, object amountInKobo)
     {
         if (string.IsNullOrWhiteSpace(reference))
             return FailVerify("Reference is required.");
@@ -133,8 +133,9 @@ public class InterswitchProvider : IPaymentProvider
             // GET /collections/api/v1/gettransaction.json
             //     ?merchantcode=MX6072&transactionreference=<ref>
             var uri = $"{_options.GetTransactionUrl}" +
-                      $"?merchantcode={Uri.EscapeDataString(_options.MerchantCode)}" +
-                      $"&transactionreference={Uri.EscapeDataString(reference)}";
+                $"?merchantcode={Uri.EscapeDataString(_options.MerchantCode)}" +
+                $"&transactionreference={Uri.EscapeDataString(reference)}" +
+                $"&amount={amountInKobo}";
 
             using var httpRequest = new HttpRequestMessage(HttpMethod.Get, uri);
             httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);

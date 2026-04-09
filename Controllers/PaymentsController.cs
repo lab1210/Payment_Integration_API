@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Payment_Integration_API.Models;
 using Payment_Integration_API.Services;
 
@@ -82,5 +83,22 @@ public class PaymentsController : ControllerBase
         // Fallback: try to detect provider from payload or headers
         // For now, return received
         return Ok(new { received = true, content });
+    }
+
+
+    [HttpGet("debug/isw-config")]
+    public IActionResult DebugIswConfig([FromServices] IOptions<Options.InterswitchOptions> opts)
+    {
+        var o = opts.Value;
+        return Ok(new
+        {
+            o.ClientId,
+            ClientSecretLength = o.ClientSecret?.Length,
+            o.MerchantCode,
+            o.PayItemId,
+            o.TokenUrl,
+            o.BaseUrl,
+            o.WebCheckoutUrl
+        });
     }
 }

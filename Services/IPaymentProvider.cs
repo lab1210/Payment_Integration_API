@@ -5,5 +5,5 @@ namespace Payment_Integration_API.Services;
 public interface IPaymentProvider
 {
     Task<PaymentResult> ChargeCustomerAsync(PaymentRequest request);
-    Task<PaymentVerificationResult> VerifyAsync(string reference);
+    Task<PaymentVerificationResult> VerifyAsync(string reference, object amountInKobo);
 }

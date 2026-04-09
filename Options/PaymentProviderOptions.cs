@@ -24,6 +24,7 @@ public class InterswitchOptions
     public string BaseUrl { get; set; } = "https://sandbox.interswitchng.com";
     public string WebhookSecret { get; set; } = string.Empty; // for HMAC
     public string WebCheckoutUrl { get; set; } = string.Empty;
-    public object? GetTransactionUrl { get; internal set; }
-    public string? TokenUrl { get; internal set; }
+
+    public string TokenUrl => "https://passport.k8.isw.la/passport/oauth/token";
+    public string GetTransactionUrl => "https://qa.interswitchng.com/collections/api/v1/gettransaction.json";
 }
