@@ -13,6 +13,8 @@ using PayStack.Net;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddMemoryCache();
+
 builder.Services.AddControllers();
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<PaymentRequestValidator>();
@@ -28,6 +30,8 @@ builder.Services.Configure<InterswitchOptions>(builder.Configuration.GetSection(
 
 builder.Services.AddScoped<IPaymentProviderFactory, PaymentProviderFactory>();
 builder.Services.AddScoped<PaymentService>();
+
+//builder.Services.AddScoped<IInterswitchWebhookVerifier, InterswitchWebhookVerifier>();
 
 builder.Services.AddHttpClient<FlutterwaveProvider>(client =>
 {
